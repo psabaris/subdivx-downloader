@@ -24,6 +24,7 @@ except ImportError:
     HAS_RICH = False
 
 BASE_URL    = "https://www.subdivx.com"
+VIDEO_EXTS  = ("mkv", "mp4", "avi", "mov", "ts")
 CONFIG_PATH = Path.home() / ".config" / "subdivx.conf"
 CDP_PORT    = 9222
 console     = Console() if HAS_RICH else None
@@ -358,10 +359,29 @@ def pick(results):
             if 1 <= ch <= n: return results[ch-1]
         except (ValueError, EOFError): pass
 
+def find_videos(folder, exts=VIDEO_EXTS, recursive=False):
+    """Lista los videos de una carpeta (sin distinguir mayusculas en la extension)."""
+    exts = {e.lower().lstrip(".") for e in exts}
+    it = folder.rglob("*") if recursive else folder.iterdir()
+    return sorted(p for p in it
+                  if p.is_file() and not p.name.startswith(".")
+                  and p.suffix.lower().lstrip(".") in exts)
+
+def process_folder(folder, client, exts=VIDEO_EXTS, recursive=False):
+    """Procesa todos los videos de una carpeta, uno por uno, salteando los que ya tienen .srt."""
+    videos  = find_videos(folder, exts, recursive)
+    pending = [v for v in videos if not (v.parent / (v.stem + ".srt")).exists()]
+    print(f"\n[DIR] {folder}: {len(videos)} video(s), {len(videos)-len(pending)} ya con sub, "
+          f"{len(pending)} pendiente(s)  [{', '.join(exts)}]")
+    for n, video in enumerate(pending, 1):
+        print(f"\n===== [{n}/{len(pending)}] =====")
+        process_file(video, client)
+
 def pick_mkv():
+    """Navegador de carpetas. Devuelve un Path de archivo, ("all", carpeta) o None."""
     current = Path.cwd()
     while True:
-        mkvs = sorted(p for ext in ("*.mkv","*.mp4","*.avi") for p in current.glob(ext))
+        mkvs = find_videos(current)
         dirs = sorted(d for d in current.iterdir() if d.is_dir() and not d.name.startswith("."))
         print(f"\n[DIR] {current}\n" + "-"*70)
         entries, idx = [], 1
@@ -372,8 +392,10 @@ def pick_mkv():
             entries.append(("dir", d)); print(f"  {idx:>3}  [D] {d.name}"); idx += 1
         for m in mkvs:
             entries.append(("file", m)); print(f"  {idx:>3}  [V] {m.name}"); idx += 1
-        raw = input("\nNumero (0=salir): ").strip()
+        hint = "T=todos los videos de esta carpeta, " if mkvs else ""
+        raw = input(f"\nNumero ({hint}0=salir): ").strip()
         if raw == "0": return None
+        if raw.lower() == "t" and mkvs: return ("all", current)
         if "/" in raw or raw.startswith("~"):
             p = Path(raw).expanduser()
             if p.is_file(): return p
@@ -413,11 +435,13 @@ def process_file(mkv_path, client):
     else:    print("[X]  Fallo la descarga.\n")
 
 def parse_args():
-    """Parsea argumentos: --brave, --chrome, --browser-path, y archivos MKV."""
+    """Parsea argumentos: --brave, --chrome, --browser-path, --ext, -r, y archivos/carpetas."""
     import platform
     browser_type = "brave"
     browser_path = None
     files = []
+    exts = VIDEO_EXTS
+    recursive = False
 
     args = sys.argv[1:]
     i = 0
@@ -429,6 +453,11 @@ def parse_args():
         elif args[i] == "--browser-path" and i + 1 < len(args):
             browser_path = args[i+1]
             i += 1
+        elif args[i] == "--ext" and i + 1 < len(args):
+            exts = tuple(e.strip().lower().lstrip(".") for e in args[i+1].split(",") if e.strip())
+            i += 1
+        elif args[i] in ("-r", "--recursive"):
+            recursive = True
         else:
             files.append(args[i])
         i += 1
@@ -447,11 +476,11 @@ def parse_args():
         browser_path = BROWSER_PATHS.get(key, BROWSER_PATHS["brave-mac"])
     cookie_path = COOKIE_PATHS.get(key, COOKIE_PATHS["brave-mac"])
 
-    return browser_path, cookie_path, files
+    return browser_path, cookie_path, files, exts, recursive
 
 
 def main():
-    browser_path, cookie_path, file_args = parse_args()
+    browser_path, cookie_path, file_args, exts, recursive = parse_args()
     username, password = load_config()
     client = SubDivXClient(username, password, browser_path, cookie_path)
     if HAS_RICH:
@@ -469,16 +498,17 @@ def main():
                 path = Path(arg)
                 if not path.exists(): print(f"[X] No existe: {arg}"); continue
                 if path.is_dir():
-                    for mkv in sorted(path.glob("*.mkv")):
-                        if (mkv.parent / (mkv.stem+".srt")).exists():
-                            print(f"[>>] Ya tiene sub: {mkv.name}"); continue
-                        process_file(mkv, client)
+                    process_folder(path, client, exts, recursive)
                 else:
                     process_file(path, client)
             return
         while True:
             mkv = pick_mkv()
             if mkv is None: print("Saliendo."); break
+            if isinstance(mkv, tuple):
+                process_folder(mkv[1], client)
+                if input("Buscar otro? [S/n]: ").strip().lower() == "n": break
+                continue
             srt = mkv.parent / (mkv.stem+".srt")
             if srt.exists():
                 if input(f"Ya existe {srt.name}. Sobreescribir? [s/N]: ").strip().lower() != "s": continue

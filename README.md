@@ -231,12 +231,23 @@ subdivx "Breaking Bad S05E01 720p BluRay.mkv"
 # Ruta completa
 subdivx /ruta/completa/al/archivo.S02E03.mkv
 
-# Carpeta completa (omite los MKV que ya tienen .srt)
+# Carpeta completa: procesa todos los videos (mkv, mp4, avi, mov, ts) uno por uno,
+# omitiendo los que ya tienen .srt
 subdivx /ruta/a/la/carpeta/
 
+# Solo ciertas extensiones
+subdivx --ext mkv /ruta/a/la/carpeta/
+subdivx --ext mkv,mp4 /ruta/a/la/carpeta/
+
+# Incluir subcarpetas (ej: carpeta de la serie con una subcarpeta por temporada)
+subdivx -r /ruta/a/la/serie/
+
 # Modo interactivo - navegador de carpetas
+# (escribir T para procesar todos los videos de la carpeta actual)
 subdivx
 ```
+
+En el modo carpeta, elegir `0` en la lista de resultados saltea ese video y pasa al siguiente.
 
 ### Comportamiento automático
 
