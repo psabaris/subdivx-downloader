@@ -112,23 +112,50 @@ class SubDivXClient:
         print("  Esperando Cloudflare...", end="", flush=True)
         deadline = time.time() + 15
         while time.time() < deadline:
-            t = self._page.title()
-            if "momento" not in t.lower() and "moment" not in t.lower():
+            t = self._safe_title()
+            if t and "momento" not in t.lower() and "moment" not in t.lower():
                 break
             time.sleep(1)
         # Si Cloudflare no paso solo, pedir que lo resuelva manualmente
-        t = self._page.title()
-        if "momento" in t.lower() or "moment" in t.lower():
+        t = self._safe_title()
+        if not t or "momento" in t.lower() or "moment" in t.lower():
             print()
             print("  Cloudflare necesita verificacion manual.")
             print("  Completa el check en la ventana de Brave y presiona ENTER.")
             input("  ENTER: ")
             time.sleep(1)
-        print(f" OK ({self._page.title()})")
+        print(f" OK ({self._safe_title()})")
+
+    def _wait_loaded(self):
+        """Espera a que termine cualquier navegacion en curso (ej: redireccion de Cloudflare)."""
+        try:
+            self._page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+
+    def _safe_eval(self, script, default=None, retries=5):
+        """evaluate() que reintenta si la pagina esta navegando en ese momento."""
+        for _ in range(retries):
+            self._wait_loaded()
+            try:
+                return self._page.evaluate(script)
+            except Exception as e:
+                msg = str(e)
+                if ("context was destroyed" in msg or "navigation" in msg.lower()
+                        or "null" in msg):
+                    time.sleep(1)
+                    continue
+                raise
+        return default
+
+    def _safe_title(self):
+        return self._safe_eval("() => document.title", default="") or ""
 
     def login(self):
-        logged = self._page.evaluate(
-            "() => document.body.innerText.includes('Mis sub') || document.body.innerText.includes('Mis subtitulos')"
+        logged = self._safe_eval(
+            "() => { const t = document.body ? document.body.innerText : '';"
+            "        return t.includes('Mis sub') || t.includes('Mis subtitulos'); }",
+            default=False,
         )
         if logged:
             return
